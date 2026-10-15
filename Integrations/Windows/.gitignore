@@ -1,0 +1,25 @@
+# Build output
+bin/
+obj/
+artifacts/
+*_wpftmp.csproj
+*.binlog
+
+# IDE / editor
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+
+# Test output
+TestResults/
+
+# Local SDK / tooling caches
+.dotnet/
+work/
+
+# OS noise
+Thumbs.db
+desktop.ini
+.DS_Store
