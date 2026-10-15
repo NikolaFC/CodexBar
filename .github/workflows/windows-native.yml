@@ -1,0 +1,51 @@
+name: Windows native
+
+on:
+  push:
+    branches: [main, windows/native-codexbar]
+    paths:
+      - 'Integrations/Windows/**'
+      - '.github/workflows/windows-native.yml'
+  pull_request:
+    paths:
+      - 'Integrations/Windows/**'
+      - '.github/workflows/windows-native.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-native-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build win-x64 portable
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Integrations/Windows
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: Integrations/Windows/global.json
+
+      # Builds, runs the self-checks under tests/, then publishes the
+      # self-contained win-x64 portable build. No credentials are read and no
+      # provider is contacted: the checks use stubbed HTTP and fixture files.
+      - name: Build, test and package
+        shell: pwsh
+        run: ./build.ps1 -Configuration Release
+
+      - name: Upload portable zip
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: CodexBar-win-x64
+          path: Integrations/Windows/artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 30
