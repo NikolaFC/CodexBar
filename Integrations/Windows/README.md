@@ -86,7 +86,38 @@ CodexBar 的做法：Codex 的额度窗口来自 `chatgpt.com` 的 usage 响应�
 - 托盘提示文字（tooltip）汇总两个 provider 的百分比；面板里按 provider 显示各自的额度
   窗口和重置时间。
 - 命令行开关：`--demo`（演示数据）、`--background`（启动后不显示面板）、`--smoke-test`、
-  `--screenshot <绝对路径>`。程序没有 `--help`。
+  `--screenshot <绝对路径>`、`--software-rendering`（本次运行强制软件渲染，诊断用）。
+  程序没有 `--help`。
+
+## 面板卡顿与渲染模式诊断
+
+有用户报告面板在**打开、拖动或点击**时一直掉帧、不跟手（拖动是持续性的，不是停顿几秒
+的可复现卡死）。
+0.1.1 已把凭据读取、额度请求与设置写入移出界面线程，修复刷新和点击时的同步阻塞。
+持续拖动低帧率的原因仍待确认，下面提供一个可检验的渲染假设和对应的 A/B 方法。
+在报告问题的机器上，用户已确认软件渲染模式下拖动明显顺滑；这不等于确定了具体驱动原因。
+
+**假设（未确认）**：WPF 在可变刷新率（VRR，G-Sync / FreeSync 类）显示器上可能被驱动
+接管刷新率，合成时被压到很低的帧率，表现为持续低帧率而不是卡死。上游 WPF 仓库有对应
+issue（[dotnet/wpf#2294](https://github.com/dotnet/wpf/issues/2294)），Windows 桌面版的
+[`RenderOptions.ProcessRenderMode`](https://learn.microsoft.com/dotnet/api/system.windows.media.renderoptions.processrendermode)
+文档也把 `SoftwareOnly` 列为低帧率问题的处理方式。这只解释了“WPF 合成路径”这半边；
+它是否就是本机现象的原因，需要在目标机器上做 A/B 才能判断。
+
+**A/B 方法**：用同一个便携包，分别以默认模式和 `--software-rendering` 启动，重复同样的
+拖动动作并对比手感。
+
+```powershell
+.\CodexBar.Windows.exe                  # 默认：由 WPF 选择硬件渲染
+.\CodexBar.Windows.exe --software-rendering   # 本次运行强制软件渲染
+```
+
+- 仅影响**本次进程**：开关只设置 WPF 的 `RenderMode.SoftwareOnly`，不写入设置文件，
+  不改全局 GPU 偏好，也不写注册表。
+- 需要**重启程序**才能切换：托盘应用是单实例的，第二个进程只会唤醒已有的那个，
+  选项不会传到正在运行的实例上。要换模式请先退出托盘图标，再用另一条命令启动。
+- 软件渲染可能增加 CPU 使用量，应根据实际拖动效果和资源占用选择是否保留。
+- 这个开关用于比较 WPF 的软件与默认渲染路径，不能单独确认某个具体驱动问题。
 
 ## demo 与 smoke 模式
 
@@ -185,7 +216,8 @@ pwsh -NoProfile -File .\build.ps1 -Clean
 
 **已跑通**
 
-- 79 项自动检查全部通过：Core 56 项，界面逻辑回归 23 项。
+- 86 项自动检查全部通过：Core 56 项，界面逻辑回归 30 项（Debug 构建 0 warning /
+  0 error）。
 - Debug 与 Release 两种配置都能编译通过。
 - demo 与 smoke 渲染路径可跑通：用内置样例数据渲染出主面板与设置窗口截图后退出。
 - Windows x64 自包含便携包已生成；打包后的 EXE 在隔离配置下通过 smoke，退出码 0，
@@ -197,8 +229,13 @@ pwsh -NoProfile -File .\build.ps1 -Clean
 
 - 尚未在另一台干净 Windows 机器上验收。
 - 真实账号下 Codex / Claude 的取数结果与额度数值没有测试。
-- 桌面 UI 交互（托盘点击、关闭主面板隐藏到托盘、设置窗口、退出、开机自启注册表）还没
-  验收：桌面 ComputerUse 授权超时，需要后续再安排一次实际交互验收。
+- 桌面自动化检查只覆盖了一部分：真实面板打开过，切换“已用 / 剩余”成功并立即更新，
+  拖动窗口成功，设置窗口能打开；但**帧率没有测量**，也不能从这些操作推断拖动是否流畅。
+  关闭主面板隐藏到托盘、退出、开机自启注册表、设置保存后关闭窗口都还没有单独验收。
+- 面板卡顿的根因尚未确定：`--software-rendering` 只是待验证的 A/B 手段（见上一节），
+  在目标机器上做过对比之前，不应把它当成已解决的结论。
+- `RenderTargetBitmap` 只检查视图布局与像素输出，**不是**拖动或帧率验证；它不会发现
+  掉帧、不跟手或合成路径问题。
 
 源码目录的 `docs/preview.png` 与 `docs/preview.settings.png` 是打包版生成的演示截图。
 

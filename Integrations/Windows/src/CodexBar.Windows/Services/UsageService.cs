@@ -107,6 +107,45 @@ public sealed class UsageService : IDisposable
             return;
         }
 
+        (string Fingerprint, UsageSnapshot Snapshot)? outcome;
+        try
+        {
+            // The credential-file fingerprint probe and the provider's own
+            // synchronous prefix - reading the credential file and setting up
+            // the transport - both block, and an uncontended
+            // <see cref="_gate"/>.WaitAsync above completes synchronously, so
+            // this method would otherwise run them on the caller's thread. When
+            // the caller is the UI thread that freezes the panel, so both steps
+            // are moved to the thread pool. Only the awaits below suspend.
+            outcome = await Task.Run(
+                () => FetchCoreAsync(provider, settings, cancellationToken),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Superseded by a newer refresh or by shutdown.
+            return;
+        }
+
+        if (outcome is not { } result)
+        {
+            // The provider itself observed the cancellation.
+            return;
+        }
+
+        Publish(MergeWithCache(provider.Id, result.Fingerprint, result.Snapshot), generation);
+    }
+
+    /// <summary>
+    /// The blocking part of one provider fetch. Always runs on a thread-pool
+    /// thread, never on whatever thread started the cycle. Returns null when
+    /// the caller's token cancelled the fetch, which must publish nothing.
+    /// </summary>
+    private async Task<(string Fingerprint, UsageSnapshot Snapshot)?> FetchCoreAsync(
+        IUsageProvider provider,
+        AppSettings settings,
+        CancellationToken cancellationToken)
+    {
         var fingerprint = Fingerprint(provider.Id, settings);
 
         UsageSnapshot snapshot;
@@ -116,7 +155,7 @@ public sealed class UsageService : IDisposable
         }
         catch (OperationCanceledException)
         {
-            return;
+            return null;
         }
         catch (Exception ex)
         {
@@ -130,7 +169,7 @@ public sealed class UsageService : IDisposable
             };
         }
 
-        Publish(MergeWithCache(provider.Id, fingerprint, snapshot), generation);
+        return (fingerprint, snapshot);
     }
 
     private UsageSnapshot MergeWithCache(ProviderId provider, string fingerprint, UsageSnapshot snapshot)

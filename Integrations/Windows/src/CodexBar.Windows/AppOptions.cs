@@ -11,6 +11,12 @@ public sealed class AppOptions
 
     public string? ScreenshotPath { get; init; }
 
+    /// <summary>
+    /// True when this run should render in software. A diagnostic A/B switch for
+    /// GPU-driver-specific panel lag; never persisted to settings.
+    /// </summary>
+    public bool UseSoftwareRendering { get; init; }
+
     /// <summary>True when the process should render demo screenshots and exit.</summary>
     public bool IsHeadlessRender => SmokeTest || ScreenshotPath is not null;
 
@@ -20,6 +26,7 @@ public sealed class AppOptions
         var background = false;
         var smoke = false;
         string? screenshot = null;
+        var softwareRendering = false;
 
         for (var index = 0; index < args.Count; index++)
         {
@@ -34,6 +41,9 @@ public sealed class AppOptions
                     break;
                 case "--smoke-test":
                     smoke = true;
+                    break;
+                case "--software-rendering":
+                    softwareRendering = true;
                     break;
                 case "--screenshot":
                     if (index + 1 < args.Count && !args[index + 1].StartsWith('-'))
@@ -62,6 +72,7 @@ public sealed class AppOptions
             Background = background,
             SmokeTest = smoke,
             ScreenshotPath = screenshot,
+            UseSoftwareRendering = softwareRendering,
         };
     }
 }

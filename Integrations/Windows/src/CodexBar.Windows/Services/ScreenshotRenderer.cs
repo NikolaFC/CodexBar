@@ -81,7 +81,7 @@ public static class ScreenshotRenderer
             NotifyAtLowQuota = false,
         };
 
-        var window = new SettingsWindow(demoMode: true, load: () => settings, save: _ => null)
+        var window = new SettingsWindow(demoMode: true, load: () => settings, save: _ => Task.FromResult<string?>(null))
         {
             Width = SettingsWidth,
             Height = SettingsHeight,
@@ -94,7 +94,7 @@ public static class ScreenshotRenderer
     private static AppViewModel BuildDemoViewModel()
     {
         var viewModel = new AppViewModel(demo: true, DisplayMode.Remaining);
-        viewModel.VersionText = "0.1.0 demo";
+        viewModel.VersionText += " demo";
 
         foreach (var provider in new IUsageProvider[] { new DemoCodexProvider(), new DemoClaudeProvider() })
         {

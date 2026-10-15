@@ -9,6 +9,7 @@ namespace CodexBar.Windows.Services;
 public sealed class SettingsService
 {
     private readonly SettingsStore? _store;
+    private readonly SettingsWriter _writer = new();
 
     public SettingsService(bool demoMode)
     {
@@ -53,9 +54,29 @@ public sealed class SettingsService
             return null;
         }
 
+        return WriteCore(settings);
+    }
+
+    /// <summary>
+    /// Persists settings off the calling thread. Writes are serialized and a
+    /// request that a newer one has superseded is skipped, so two quick saves
+    /// cannot leave the older snapshot on disk. Demo runs never touch disk.
+    /// </summary>
+    public Task<string?> SaveAsync(AppSettings settings, CancellationToken cancellationToken = default)
+    {
+        if (_store is null)
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        return _writer.WriteAsync(() => WriteCore(settings), cancellationToken);
+    }
+
+    private string? WriteCore(AppSettings settings)
+    {
         try
         {
-            _store.Save(settings);
+            _store!.Save(settings);
             return null;
         }
         catch (Exception ex)
@@ -77,6 +98,15 @@ public static class CredentialDiscovery
     {
         try
         {
+            // Same policy as the usage fingerprint: a path that is not local
+            // could make File.Exists dispatch a request to another machine, so
+            // reject it before any metadata probe. Environment variables such
+            // as CODEX_HOME and CLAUDE_CONFIG_DIR can name a UNC share.
+            if (!LocalPathProbe.IsLocal(path))
+            {
+                return null;
+            }
+
             return File.Exists(path) ? path : null;
         }
         catch (Exception)

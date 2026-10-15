@@ -13,7 +13,7 @@ public sealed class AppViewModel : ObservableObject
     private string _statusLine = "正在启动…";
     private bool _isRefreshing;
     private bool _isDemo;
-    private string _versionText = "0.1.0";
+    private string _versionText = typeof(AppViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.1";
 
     public AppViewModel(bool demo, DisplayMode initialMode = DisplayMode.Remaining)
     {

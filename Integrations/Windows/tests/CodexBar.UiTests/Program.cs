@@ -19,6 +19,8 @@ Scratch.AssertProfileIsRedirected();
 TestRunner.Reset();
 
 UsageServiceTests.Register();
+ResponsivenessTests.Register();
+SettingsWriteTests.Register();
 LowQuotaNotifierTests.Register();
 AppOptionsTests.Register();
 CardActionTests.Register();

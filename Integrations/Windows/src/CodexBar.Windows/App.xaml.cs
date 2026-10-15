@@ -34,6 +34,12 @@ public partial class App : Application
         base.OnStartup(e);
 
         _options = AppOptions.Parse(e.Args);
+
+        // Diagnostic A/B switch. Applied before any window is created so the
+        // process starts up with a deterministic render mode, and before the
+        // headless render path so a --screenshot A/B run picks it up too.
+        RenderingPolicy.Apply(_options);
+
         if (_options.IsDemo || _options.IsHeadlessRender)
         {
             // Demo and smoke runs must not create log files either.
@@ -241,11 +247,11 @@ public partial class App : Application
 
     private void OnActivationRequested()
     {
-        Dispatcher.BeginInvoke(() =>
-        {
-            ShowPanel();
-            RequestRefresh();
-        });
+        // A second launch asks for the panel, nothing more. Avoiding a refresh
+        // here keeps activation from starting unnecessary provider work, so the
+        // numbers on screen can be a little old instead. Fresh data comes from
+        // the refresh timer, the tray's 立即刷新 item, or a settings save.
+        Dispatcher.BeginInvoke(() => ShowPanel());
     }
 
     private void TogglePanel()
@@ -312,29 +318,36 @@ public partial class App : Application
         _settingsWindow = null;
     }
 
-    private string? SaveSettings(AppSettings settings)
+    /// <summary>
+    /// Applies edited settings. The registry and file writes run off the UI
+    /// thread and the method resumes on it, so every field it touches below is
+    /// still mutated on the dispatcher.
+    /// </summary>
+    private async Task<string?> SaveSettings(AppSettings settings)
     {
         if (_settings is null)
         {
             return "设置服务不可用。";
         }
 
-        if (!_settings.IsEphemeral)
+        var ephemeral = _settings.IsEphemeral;
+
+        if (!ephemeral)
         {
-            var startupError = StartupRegistration.Apply(settings.StartWithWindows);
+            var startupError = await Task.Run(() => StartupRegistration.Apply(settings.StartWithWindows));
             if (startupError is not null)
             {
                 return startupError;
             }
         }
 
-        var error = _settings.Save(settings);
+        var error = await _settings.SaveAsync(settings);
         if (error is not null)
         {
-            if (!_settings.IsEphemeral)
+            if (!ephemeral)
             {
                 // Keep the registry in step with the settings that are still on disk.
-                StartupRegistration.Apply(_currentSettings.StartWithWindows);
+                await Task.Run(() => StartupRegistration.Apply(_currentSettings.StartWithWindows));
             }
 
             return error;
@@ -349,6 +362,9 @@ public partial class App : Application
             _refreshTimer.Interval = RefreshInterval();
         }
 
+        // The saved settings change what a cycle should fetch, so start a new
+        // generation; snapshots produced with the previous settings are dropped
+        // by generation instead of being shown next to the new ones.
         RequestRefresh();
         return null;
     }
@@ -369,7 +385,7 @@ public partial class App : Application
     /// </summary>
     private void OnDisplayModeChanged(DisplayMode mode)
     {
-        if (_settings is null)
+        if (_settings is not { } settings)
         {
             return;
         }
@@ -381,7 +397,26 @@ public partial class App : Application
         }
 
         _currentSettings = _currentSettings with { ShowRemaining = showRemaining };
-        _settings.Save(_currentSettings);
+
+        // Persist off the UI thread. Writes are serialized and a superseded
+        // request is dropped, so rapid toggling can never let an older write
+        // land after a newer one.
+        _ = PersistDisplayModeAsync(settings, _currentSettings);
+    }
+
+    private static async Task PersistDisplayModeAsync(SettingsService settings, AppSettings value)
+    {
+        try
+        {
+            if (await settings.SaveAsync(value).ConfigureAwait(false) is not null)
+            {
+                AppLog.Warn("display-mode-save-failed");
+            }
+        }
+        catch (Exception ex)
+        {
+            AppLog.Error("display-mode-save-failed", ex);
+        }
     }
 
     private void OnMainWindowClosing(object? sender, System.ComponentModel.CancelEventArgs e)

@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
@@ -14,8 +15,10 @@ public partial class SettingsWindow : Window
 
     private readonly bool _demoMode;
     private readonly Func<AppSettings> _load;
+    private bool _closed;
+    private bool _saving;
 
-    public SettingsWindow(bool demoMode, Func<AppSettings> load, Func<AppSettings, string?> save)
+    public SettingsWindow(bool demoMode, Func<AppSettings> load, Func<AppSettings, Task<string?>> save)
     {
         _demoMode = demoMode;
         _load = load;
@@ -33,7 +36,12 @@ public partial class SettingsWindow : Window
         DemoHint.Visibility = demoMode ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    public Func<AppSettings, string?> SaveHandler { get; }
+    /// <summary>
+    /// Applies the edited settings. Returns null on success or a message to
+    /// show, and may complete asynchronously; the caller only ever sees the
+    /// result back on the dispatcher.
+    /// </summary>
+    public Func<AppSettings, Task<string?>> SaveHandler { get; }
 
     public AppSettings? Result { get; private set; }
 
@@ -66,15 +74,64 @@ public partial class SettingsWindow : Window
         }
         else
         {
-            CodexPathHint.Text = CredentialDiscovery.CodexAuthPath is { } codexDefault
-                ? $"自动发现：{codexDefault}"
-                : "未自动发现，请手动指定或在 CLI 中登录。";
-            ClaudePathHint.Text = CredentialDiscovery.ClaudeCredentialsPath is { } claudeDefault
-                ? $"自动发现：{claudeDefault}"
-                : "未自动发现，请手动指定或在 CLI 中登录。";
+            // Probing the default credential paths is file-system I/O with no
+            // timeout (a network share or a sleeping drive can stall it), so
+            // the first paint must not wait for it. Show a placeholder and fill
+            // the real answer in when the probe returns.
+            CodexPathHint.Text = "正在检查本机凭据路径…";
+            ClaudePathHint.Text = "正在检查本机凭据路径…";
+            _ = PopulateCredentialHintsAsync();
         }
 
         StatusText.Text = _demoMode ? "演示模式：更改不会写入磁盘。" : string.Empty;
+    }
+
+    private async Task PopulateCredentialHintsAsync()
+    {
+        var hints = await Task.Run(
+            () => (Codex: CredentialDiscovery.CodexAuthPath, Claude: CredentialDiscovery.ClaudeCredentialsPath))
+            .ConfigureAwait(false);
+
+        // Marshal explicitly instead of relying on the captured context: the
+        // window may already be closed, and a control must never be touched
+        // from a thread-pool thread.
+        await Dispatcher.InvokeAsync(() =>
+        {
+            if (_closed)
+            {
+                return;
+            }
+
+            CodexPathHint.Text = hints.Codex is { } codexDefault
+                ? $"自动发现：{codexDefault}"
+                : "未自动发现，请手动指定或在 CLI 中登录。";
+            ClaudePathHint.Text = hints.Claude is { } claudeDefault
+                ? $"自动发现：{claudeDefault}"
+                : "未自动发现，请手动指定或在 CLI 中登录。";
+        });
+    }
+
+    protected override void OnClosed(EventArgs e)
+    {
+        // A pending probe callback checks this before touching the controls.
+        _closed = true;
+        base.OnClosed(e);
+    }
+
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (_saving)
+        {
+            // A write is still in flight. Letting the dialog close now would
+            // let that write finish after the user has moved on - reopening
+            // settings or switching the panel's display mode - and overwrite
+            // the newer state. Keep the modal open and say why.
+            e.Cancel = true;
+            StatusText.Text = "正在保存，请稍候…";
+            return;
+        }
+
+        base.OnClosing(e);
     }
 
     private void OnPreviewKeyDown(object sender, KeyEventArgs e)
@@ -135,12 +192,29 @@ public partial class SettingsWindow : Window
 
     private void OnCancelClick(object sender, RoutedEventArgs e) => Close();
 
-    private void OnSaveClick(object sender, RoutedEventArgs e)
+    private async void OnSaveClick(object sender, RoutedEventArgs e)
     {
+        if (_saving)
+        {
+            // A save is already in flight; ignore the extra click instead of
+            // queueing a second write.
+            return;
+        }
+
+        _saving = true;
+        StatusText.Text = _demoMode ? "正在应用…" : "正在保存…";
         try
         {
             var settings = BuildSettings();
-            var error = SaveHandler(settings);
+            var error = await SaveHandler(settings);
+
+            // OnClosing keeps the dialog open while _saving, so this is
+            // belt-and-braces in case that ever changes.
+            if (_closed)
+            {
+                return;
+            }
+
             if (error is not null)
             {
                 StatusText.Text = error;
@@ -149,12 +223,23 @@ public partial class SettingsWindow : Window
 
             Result = settings;
             StatusText.Text = _demoMode ? "已应用到本次演示会话。" : "已保存。";
+
+            // Clear the flag first: this close is the intended one, so the
+            // OnClosing guard must not cancel it.
+            _saving = false;
             DialogResult = true;
         }
         catch (Exception ex)
         {
             AppLog.Error("settings-apply-failed", ex);
-            StatusText.Text = "保存失败，请检查填写内容。";
+            if (!_closed)
+            {
+                StatusText.Text = "保存失败，请检查填写内容。";
+            }
+        }
+        finally
+        {
+            _saving = false;
         }
     }
 
