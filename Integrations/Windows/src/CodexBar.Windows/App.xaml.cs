@@ -29,6 +29,12 @@ public partial class App : Application
     private AppSettings _currentSettings = new();
     private bool _isExiting;
 
+    // Latest snapshot per provider, mirrored to usage-snapshot.json for the DSH phone
+    // adapter. Touched only on the UI thread; the file write runs off it.
+    private readonly Dictionary<ProviderId, UsageSnapshot> _exported = new();
+    private readonly SettingsWriter _exportWriter = new();
+    private string? _exportPath;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -64,6 +70,10 @@ public partial class App : Application
 
         _settings = new SettingsService(_options.IsDemo);
         _currentSettings = _settings.Load();
+        if (_settings.FilePath is { } settingsPath && Path.GetDirectoryName(settingsPath) is { } dataDirectory)
+        {
+            _exportPath = Path.Combine(dataDirectory, UsageExport.FileName);
+        }
         _viewModel = new AppViewModel(_options.IsDemo, _currentSettings.ShowRemaining ? DisplayMode.Remaining : DisplayMode.Used);
         _viewModel.RefreshRequested += RequestRefresh;
         _viewModel.OpenSettingsRequested += ShowSettings;
@@ -241,6 +251,7 @@ public partial class App : Application
 
         _viewModel.Apply(snapshot);
         _tray.UpdateTooltip();
+        ExportSnapshot(snapshot);
 
         if (_currentSettings.NotifyAtLowQuota && _notifier is not null)
         {
@@ -249,6 +260,36 @@ public partial class App : Application
                 _tray.ShowLowQuotaAlert(alert);
             }
         }
+    }
+
+    /// <summary>
+    /// Mirrors the newest snapshot of every provider to disk. Demo runs have no
+    /// export path, so they never write. A failed write is logged and the next
+    /// snapshot simply tries again.
+    /// </summary>
+    private void ExportSnapshot(UsageSnapshot snapshot)
+    {
+        if (_exportPath is not { } path)
+        {
+            return;
+        }
+
+        _exported[snapshot.Provider] = snapshot;
+        var app = "CodexBar.Windows " + typeof(App).Assembly.GetName().Version?.ToString(3);
+        var json = UsageExport.Serialize(_exported.Values.ToList(), DateTimeOffset.UtcNow, app);
+        _ = _exportWriter.WriteAsync(() =>
+        {
+            try
+            {
+                UsageExport.Write(path, json);
+            }
+            catch (Exception ex)
+            {
+                AppLog.Error("usage-export-failed", ex);
+            }
+
+            return null;
+        });
     }
 
     private void OnActivationRequested()

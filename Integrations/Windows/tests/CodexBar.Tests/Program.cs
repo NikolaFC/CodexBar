@@ -9,6 +9,7 @@ SettingsTests.Register();
 SecurityTests.Register();
 ApiKeyProviderTests.Register();
 PoolTests.Register();
+UsageExportTests.Register();
 
 Console.WriteLine("CodexBar.Core test runner");
 Console.WriteLine($"Temp workspace: {TempWorkspace.Root}");
