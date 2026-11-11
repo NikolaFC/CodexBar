@@ -1,5 +1,22 @@
 # Windows 本机验收记录
 
+## 0.2.1（2026-11-07）
+
+- 新增号池：Codex 合并 CLI 登录与 Hermes `credential_pool.openai-codex`（按 account id 去重），Kimi Code / OpenCode Go 合并同前缀的多个 Key 变量；卡片大数字取最充裕的号。
+- Core 87/87（新增 14 项：合并/部分失败/汇总、后缀变量发现与去重、URL 型变量不当 Key、Hermes 池只读 oauth 条目、Codex 去重与过期条目、Business Pro Lite 套餐名）、界面逻辑 30/30。
+- `--demo --screenshot` 渲染（面板高度加到 1320 以容纳四张卡）核对号池卡：账号小标题、说明过长时省略号截断且不压右侧来源文字，单号卡片无空白标题行。
+- 安装前备份 0.2.0 EXE 与设置；安装 6/6 SHA256 一致，`--software-rendering` 保留。
+- 已安装实例 UI Automation 只读核对：Codex 显示 2 个号（Business Pro Lite 与 Free），Kimi Code 显示 2 个号，读数与直接请求一致。
+
+## 0.2.0（2026-11-07）
+
+- 新增 Kimi Code、OpenCode Go 两个 API Key provider（默认关闭），按上游 `KimiUsageFetcher.fetchCodeAPIUsage` 与 `OpenCodeGoUsageFetcher.fetchAPIUsage` 移植。
+- Core 73/73（新增 17 项：两路解析、Key 解析优先级与 .env 读取、指纹不含 Key、401 不回显正文、设置往返与旧设置兼容）、界面逻辑 30/30。
+- 隔离控制台引用 CodexBar.Core 直连真实接口：两路均 Ready，读数与直接请求的原始响应一致。
+- `build.ps1` 发布 0.2.0 自包含单文件；`--demo --screenshot` 渲染主面板与设置窗口正常。
+- 安装前备份 0.1.1 EXE 与用户设置；安装脚本 6/6 文件 SHA256 一致，开始菜单快捷方式 `--software-rendering` 参数保留。
+- 已安装实例通过 UI Automation 只读核对：四张卡均有数据，Kimi/OpenCode 来源显示变量名，不含 Key。
+
 ## 0.1.1（2026-10-15）
 
 - Release 构建与 win-x64 自包含发布成功：0 warnings / 0 errors。

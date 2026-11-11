@@ -117,10 +117,16 @@ public partial class App : Application
     {
         if (_options.IsDemo)
         {
-            return new IUsageProvider[] { new DemoCodexProvider(), new DemoClaudeProvider() };
+            return DemoProviders.All;
         }
 
-        return new IUsageProvider[] { new CodexUsageProvider(), new ClaudeUsageProvider() };
+        return new IUsageProvider[]
+        {
+            new CodexUsageProvider(),
+            new ClaudeUsageProvider(),
+            new KimiUsageProvider(),
+            new OpenCodeGoUsageProvider(),
+        };
     }
 
     private void StartTimers()
@@ -374,7 +380,7 @@ public partial class App : Application
         MessageBox.Show(
             _mainWindow!,
             UsageLinks.LoginInstructions(provider),
-            provider == ProviderId.Codex ? "Codex 登录说明" : "Claude 登录说明",
+            $"{ProviderCatalog.DisplayName(provider)} 登录说明",
             MessageBoxButton.OK,
             MessageBoxImage.Information);
     }

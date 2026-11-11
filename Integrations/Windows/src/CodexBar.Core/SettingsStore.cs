@@ -75,6 +75,8 @@ public sealed class SettingsStore
         RefreshSeconds = ClampRefreshSeconds(settings.RefreshSeconds),
         CodexAuthPath = NullIfBlank(settings.CodexAuthPath),
         ClaudeCredentialsPath = NullIfBlank(settings.ClaudeCredentialsPath),
+        ApiKeyEnvFile = NullIfBlank(settings.ApiKeyEnvFile),
+        HermesAuthPath = NullIfBlank(settings.HermesAuthPath),
     };
 
     /// <summary>
@@ -151,9 +153,19 @@ public sealed class SettingsStore
 
         public bool ClaudeEnabled { get; set; } = true;
 
+        public bool KimiEnabled { get; set; }
+
+        public bool OpenCodeGoEnabled { get; set; }
+
         public string? CodexAuthPath { get; set; }
 
         public string? ClaudeCredentialsPath { get; set; }
+
+        /// <summary>Path of a .env file to look up API keys in. The keys themselves are never stored here.</summary>
+        public string? ApiKeyEnvFile { get; set; }
+
+        /// <summary>Path of a Hermes auth.json whose Codex credential pool is read as extra accounts.</summary>
+        public string? HermesAuthPath { get; set; }
 
         public bool StartWithWindows { get; set; }
 
@@ -166,8 +178,12 @@ public sealed class SettingsStore
             RefreshSeconds = settings.RefreshSeconds,
             CodexEnabled = settings.CodexEnabled,
             ClaudeEnabled = settings.ClaudeEnabled,
+            KimiEnabled = settings.KimiEnabled,
+            OpenCodeGoEnabled = settings.OpenCodeGoEnabled,
             CodexAuthPath = settings.CodexAuthPath,
             ClaudeCredentialsPath = settings.ClaudeCredentialsPath,
+            ApiKeyEnvFile = settings.ApiKeyEnvFile,
+            HermesAuthPath = settings.HermesAuthPath,
             StartWithWindows = settings.StartWithWindows,
             NotifyAtLowQuota = settings.NotifyAtLowQuota,
             ShowRemaining = settings.ShowRemaining,
@@ -178,8 +194,12 @@ public sealed class SettingsStore
             RefreshSeconds = RefreshSeconds,
             CodexEnabled = CodexEnabled,
             ClaudeEnabled = ClaudeEnabled,
+            KimiEnabled = KimiEnabled,
+            OpenCodeGoEnabled = OpenCodeGoEnabled,
             CodexAuthPath = CodexAuthPath,
             ClaudeCredentialsPath = ClaudeCredentialsPath,
+            ApiKeyEnvFile = ApiKeyEnvFile,
+            HermesAuthPath = HermesAuthPath,
             StartWithWindows = StartWithWindows,
             NotifyAtLowQuota = NotifyAtLowQuota,
             ShowRemaining = ShowRemaining,

@@ -276,13 +276,21 @@ internal sealed class FakeHttpHandler : HttpMessageHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        Requests.Add(request);
+        Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> next;
 
-        if (_responses.Count == 0)
+        // Pooled providers fetch their accounts concurrently.
+        lock (_responses)
         {
-            throw new InvalidOperationException("FakeHttpHandler received an unexpected request.");
+            Requests.Add(request);
+
+            if (_responses.Count == 0)
+            {
+                throw new InvalidOperationException("FakeHttpHandler received an unexpected request.");
+            }
+
+            next = _responses.Dequeue();
         }
 
-        return _responses.Dequeue()(request, cancellationToken);
+        return next(request, cancellationToken);
     }
 }

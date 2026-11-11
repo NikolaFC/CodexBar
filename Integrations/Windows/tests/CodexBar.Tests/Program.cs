@@ -7,6 +7,8 @@ ProviderTests.Register();
 ClaudeProviderTests.Register();
 SettingsTests.Register();
 SecurityTests.Register();
+ApiKeyProviderTests.Register();
+PoolTests.Register();
 
 Console.WriteLine("CodexBar.Core test runner");
 Console.WriteLine($"Temp workspace: {TempWorkspace.Root}");

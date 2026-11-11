@@ -92,8 +92,7 @@ public sealed class UsageService : IDisposable
         int generation,
         CancellationToken cancellationToken)
     {
-        var enabled = provider.Id == ProviderId.Codex ? settings.CodexEnabled : settings.ClaudeEnabled;
-        if (!enabled)
+        if (!settings.IsEnabled(provider.Id))
         {
             _cache.TryRemove(provider.Id, out _);
             Publish(
@@ -159,7 +158,7 @@ public sealed class UsageService : IDisposable
         }
         catch (Exception ex)
         {
-            AppLog.Error(provider.Id == ProviderId.Codex ? "codex-fetch-threw" : "claude-fetch-threw", ex);
+            AppLog.Error($"{provider.Id.ToString().ToLowerInvariant()}-fetch-threw", ex);
             snapshot = new UsageSnapshot
             {
                 Provider = provider.Id,
@@ -208,14 +207,30 @@ public sealed class UsageService : IDisposable
     }
 
     /// <summary>
-    /// Non-secret identity of the credential file: resolved path, length, and
-    /// last-write time. File contents, and therefore any token, are never read.
+    /// Non-secret identity of the credential: for OAuth providers the resolved
+    /// path, length, and last-write time of the credential file (contents, and
+    /// therefore any token, are never read); for API-key providers a keyed
+    /// digest that only lives in this process.
     /// </summary>
     private string Fingerprint(ProviderId provider, AppSettings settings)
     {
         if (!_probeCredentialFiles)
         {
-            return provider == ProviderId.Codex ? "demo:codex" : "demo:claude";
+            return $"demo:{provider}";
+        }
+
+        if (provider is ProviderId.Kimi or ProviderId.OpenCodeGo)
+        {
+            try
+            {
+                return string.Join(
+                    ";",
+                    ApiKeyResolver.ResolveAll(provider, settings).Select(load => load.Fingerprint));
+            }
+            catch (Exception)
+            {
+                return "unresolved";
+            }
         }
 
         try
@@ -238,9 +253,15 @@ public sealed class UsageService : IDisposable
 
             var full = LocalPathProbe.Normalize(path);
             var info = new FileInfo(full);
-            return info.Exists
+            var fingerprint = info.Exists
                 ? $"{full}|{info.Length}|{info.LastWriteTimeUtc.Ticks}"
                 : $"{full}|absent";
+
+            // Hermes rewrites its auth.json on every request, so only the chosen
+            // path identifies the pool; each pooled window is labelled by account.
+            return provider == ProviderId.Codex && !string.IsNullOrWhiteSpace(settings.HermesAuthPath)
+                ? $"{fingerprint}|hermes:{settings.HermesAuthPath.Trim()}"
+                : fingerprint;
         }
         catch (Exception)
         {

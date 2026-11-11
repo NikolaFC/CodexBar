@@ -57,11 +57,15 @@ public partial class SettingsWindow : Window
 
         CodexEnabledBox.IsChecked = settings.CodexEnabled;
         ClaudeEnabledBox.IsChecked = settings.ClaudeEnabled;
+        KimiEnabledBox.IsChecked = settings.KimiEnabled;
+        OpenCodeGoEnabledBox.IsChecked = settings.OpenCodeGoEnabled;
         NotifyLowQuotaBox.IsChecked = settings.NotifyAtLowQuota;
         StartWithWindowsBox.IsChecked = settings.StartWithWindows;
 
         CodexPathBox.Text = settings.CodexAuthPath ?? string.Empty;
         ClaudePathBox.Text = settings.ClaudeCredentialsPath ?? string.Empty;
+        ApiKeyEnvFileBox.Text = settings.ApiKeyEnvFile ?? string.Empty;
+        HermesAuthPathBox.Text = settings.HermesAuthPath ?? string.Empty;
 
         var minutes = Math.Max(1, (int)Math.Round(settings.RefreshSeconds / 60.0));
         var selected = Array.IndexOf(RefreshMinuteOptions, minutes);
@@ -156,6 +160,12 @@ public partial class SettingsWindow : Window
 
     private void OnBrowseClaudeClick(object sender, RoutedEventArgs e)
         => BrowseFor(ClaudePathBox, "Claude 凭据 (.credentials.json)|.credentials.json|所有文件 (*.*)|*.*");
+
+    private void OnBrowseHermesClick(object sender, RoutedEventArgs e)
+        => BrowseFor(HermesAuthPathBox, "Hermes 凭据 (auth.json)|auth.json|所有文件 (*.*)|*.*");
+
+    private void OnBrowseEnvFileClick(object sender, RoutedEventArgs e)
+        => BrowseFor(ApiKeyEnvFileBox, "环境变量文件 (.env)|*.env;.env|所有文件 (*.*)|*.*");
 
     private void BrowseFor(TextBox target, string filter)
     {
@@ -253,10 +263,14 @@ public partial class SettingsWindow : Window
             RefreshSeconds = minutes * 60,
             CodexEnabled = CodexEnabledBox.IsChecked == true,
             ClaudeEnabled = ClaudeEnabledBox.IsChecked == true,
+            KimiEnabled = KimiEnabledBox.IsChecked == true,
+            OpenCodeGoEnabled = OpenCodeGoEnabledBox.IsChecked == true,
             NotifyAtLowQuota = NotifyLowQuotaBox.IsChecked == true,
             StartWithWindows = StartWithWindowsBox.IsChecked == true,
             CodexAuthPath = NormalizePath(CodexPathBox.Text),
             ClaudeCredentialsPath = NormalizePath(ClaudePathBox.Text),
+            ApiKeyEnvFile = NormalizePath(ApiKeyEnvFileBox.Text),
+            HermesAuthPath = NormalizePath(HermesAuthPathBox.Text),
         };
     }
 

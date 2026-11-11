@@ -13,7 +13,7 @@ public sealed class AppViewModel : ObservableObject
     private string _statusLine = "正在启动…";
     private bool _isRefreshing;
     private bool _isDemo;
-    private string _versionText = typeof(AppViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.1.1";
+    private string _versionText = typeof(AppViewModel).Assembly.GetName().Version?.ToString(3) ?? "0.2.1";
 
     public AppViewModel(bool demo, DisplayMode initialMode = DisplayMode.Remaining)
     {
@@ -24,6 +24,8 @@ public sealed class AppViewModel : ObservableObject
         {
             new(ProviderId.Codex, "Codex", Accent("AccentCodexBrush"), initialMode),
             new(ProviderId.Claude, "Claude", Accent("AccentClaudeBrush"), initialMode),
+            new(ProviderId.Kimi, ProviderCatalog.DisplayName(ProviderId.Kimi), Accent("AccentKimiBrush"), initialMode),
+            new(ProviderId.OpenCodeGo, ProviderCatalog.DisplayName(ProviderId.OpenCodeGo), Accent("AccentOpenCodeBrush"), initialMode),
         };
 
         RefreshCommand = new RelayCommand(() => RefreshRequested?.Invoke());

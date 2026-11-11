@@ -18,7 +18,7 @@ public sealed class LowQuotaNotifier
 
         foreach (var window in snapshot.Windows)
         {
-            var key = $"{snapshot.Provider}:{window.Name}";
+            var key = $"{snapshot.Provider}:{window.Account}:{window.Name}";
             var above = window.UsedPercent >= Threshold;
             var resetChanged = _states.TryGetValue(key, out var existing)
                                && existing.ResetsAt != window.ResetsAt;
@@ -38,7 +38,9 @@ public sealed class LowQuotaNotifier
             if (above && !state.Notified)
             {
                 state.Notified = true;
-                var label = snapshot.Provider == ProviderId.Codex ? "Codex" : "Claude";
+                var label = window.Account is { } account
+                    ? $"{ProviderCatalog.DisplayName(snapshot.Provider)} · {account}"
+                    : ProviderCatalog.DisplayName(snapshot.Provider);
                 alerts.Add($"{label} · {window.Name} 额度已用 {Math.Round(window.UsedPercent)}%");
             }
             else if (!above)

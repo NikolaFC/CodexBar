@@ -5,7 +5,7 @@ using CodexBar.Core;
 
 namespace CodexBar.Windows.ViewModels;
 
-/// <summary>Rendering state for one provider card (Codex or Claude).</summary>
+/// <summary>Rendering state for one provider card; a multi-account provider is one pooled card.</summary>
 public sealed class ProviderCardViewModel : ObservableObject
 {
     private static readonly TimeSpan StaleAfter = TimeSpan.FromMinutes(3);
@@ -138,6 +138,7 @@ public sealed class ProviderCardViewModel : ObservableObject
         RaisePropertyChanged(nameof(HasAccount));
 
         Windows.Clear();
+        string? previousAccount = null;
         foreach (var window in snapshot.Windows)
         {
             if (string.IsNullOrWhiteSpace(window.Name))
@@ -145,12 +146,16 @@ public sealed class ProviderCardViewModel : ObservableObject
                 continue;
             }
 
+            // Pooled windows arrive grouped by account; the first row of each group carries its header.
+            var header = window.Account is { } account && account != previousAccount ? account : null;
+            previousAccount = window.Account;
             Windows.Add(new WindowRowViewModel(
                 WindowRowViewModel.LocalizeName(window.Name),
                 window.UsedPercent,
                 window.ResetsAt,
                 AccentBrush,
-                _mode));
+                _mode,
+                header));
         }
 
         RaisePropertyChanged(nameof(HasWindows));
@@ -219,10 +224,22 @@ public sealed class ProviderCardViewModel : ObservableObject
             return;
         }
 
+        var modeText = _mode == DisplayMode.Used ? "已用" : "剩余";
+
+        // A pool is only as empty as its best account: headline the account with the most
+        // headroom on its tightest window instead of whichever account ran out first.
+        if (_snapshot is { } snapshot && AccountPool.Summarize(snapshot) is { } pool)
+        {
+            var used = pool.Binding.UsedPercent;
+            PrimaryPercentText = WindowRowViewModel.FormatPercent(_mode == DisplayMode.Used ? used : Math.Clamp(100 - used, 0, 100));
+            PrimaryCaption = $"号池 {pool.Available}/{pool.Total} 可用 · {pool.BestAccount} {pool.Binding.Name} · {modeText}";
+            return;
+        }
+
         var primary = Windows.OrderByDescending(window => window.UsedPercent).First();
         var value = _mode == DisplayMode.Used ? primary.UsedPercent : primary.RemainingPercent;
         PrimaryPercentText = WindowRowViewModel.FormatPercent(value);
-        PrimaryCaption = $"{primary.Name} · {(_mode == DisplayMode.Used ? "已用" : "剩余")}";
+        PrimaryCaption = $"{primary.Name} · {modeText}";
     }
 
     private static string BuildMessage(UsageSnapshot snapshot)
@@ -230,7 +247,10 @@ public sealed class ProviderCardViewModel : ObservableObject
         var status = snapshot.Status;
         if (status == ProviderStatus.Ready)
         {
-            return snapshot.Windows.Count == 0 ? "服务已返回数据，但当前没有可显示的额度窗口。" : string.Empty;
+            // A ready pool can still carry notes about members that failed this round.
+            return snapshot.Windows.Count == 0
+                ? "服务已返回数据，但当前没有可显示的额度窗口。"
+                : snapshot.Message ?? string.Empty;
         }
 
         var parts = new List<string>();

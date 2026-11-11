@@ -11,9 +11,16 @@ public sealed class WindowRowViewModel : ObservableObject
     private DateTimeOffset? _resetsAt;
     private DisplayMode _mode;
 
-    public WindowRowViewModel(string name, double usedPercent, DateTimeOffset? resetsAt, Brush accent, DisplayMode mode)
+    public WindowRowViewModel(
+        string name,
+        double usedPercent,
+        DateTimeOffset? resetsAt,
+        Brush accent,
+        DisplayMode mode,
+        string? accountHeader = null)
     {
         _name = name;
+        AccountHeader = accountHeader ?? string.Empty;
         _usedPercent = Math.Clamp(usedPercent, 0, 100);
         _resetsAt = resetsAt;
         AccentBrush = accent;
@@ -21,6 +28,11 @@ public sealed class WindowRowViewModel : ObservableObject
     }
 
     public string Name => _name;
+
+    /// <summary>Pool member name shown above the first row of each account; empty otherwise.</summary>
+    public string AccountHeader { get; }
+
+    public bool HasAccountHeader => AccountHeader.Length > 0;
 
     public Brush AccentBrush { get; }
 

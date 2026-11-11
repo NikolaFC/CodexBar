@@ -76,23 +76,33 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Grid.Column="0"
+                <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="3"
+                           Text="{Binding AccountHeader}"
+                           Foreground="{StaticResource TextSecondaryBrush}"
+                           FontSize="11.5"
+                           FontWeight="SemiBold"
+                           Margin="0,2,0,6"
+                           TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding HasAccountHeader, Converter={StaticResource BoolToVisibility}}" />
+
+                <TextBlock Grid.Row="1" Grid.Column="0"
                            Text="{Binding Name}"
                            Foreground="{StaticResource TextPrimaryBrush}"
                            FontSize="12.5"
                            VerticalAlignment="Center"
                            TextTrimming="CharacterEllipsis" />
 
-                <ProgressBar Grid.Row="0" Grid.Column="1"
+                <ProgressBar Grid.Row="1" Grid.Column="1"
                              Style="{StaticResource QuotaBar}"
                              Value="{Binding BarPercent, Mode=OneWay}"
                              Foreground="{Binding BarBrush}"
                              Margin="0,0,10,0"
                              VerticalAlignment="Center" />
 
-                <TextBlock Grid.Row="0" Grid.Column="2"
+                <TextBlock Grid.Row="1" Grid.Column="2"
                            Text="{Binding PercentText}"
                            Foreground="{StaticResource TextPrimaryBrush}"
                            FontSize="12.5"
@@ -100,7 +110,7 @@
                            HorizontalAlignment="Right"
                            VerticalAlignment="Center" />
 
-                <TextBlock Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="2"
                            Text="{Binding DetailText}"
                            Style="{StaticResource HintText}"
                            Margin="0,4,0,0" />
@@ -150,18 +160,21 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
 
-                        <StackPanel Grid.Column="0" Orientation="Horizontal">
-                            <TextBlock Text="{Binding PrimaryPercentText}"
+                        <DockPanel Grid.Column="0" LastChildFill="True" Margin="0,0,10,0">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="{Binding PrimaryPercentText}"
                                        FontSize="28"
                                        FontWeight="SemiBold"
                                        Foreground="{StaticResource TextPrimaryBrush}"
                                        VerticalAlignment="Bottom" />
                             <TextBlock Text="{Binding PrimaryCaption}"
+                                       ToolTip="{Binding PrimaryCaption}"
                                        FontSize="11.5"
                                        Foreground="{StaticResource TextSecondaryBrush}"
                                        Margin="8,0,0,6"
+                                       TextTrimming="CharacterEllipsis"
                                        VerticalAlignment="Bottom" />
-                        </StackPanel>
+                        </DockPanel>
 
                         <StackPanel Grid.Column="1" VerticalAlignment="Bottom" Margin="0,0,0,4">
                             <TextBlock Text="{Binding FreshnessText}"

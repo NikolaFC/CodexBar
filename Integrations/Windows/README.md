@@ -1,6 +1,6 @@
 # CodexBar.Windows
 
-Windows 上的托盘小工具，用来把 Codex 和 Claude 的订阅额度窗口（session / weekly 等）
+Windows 上的托盘小工具，用来把 Codex、Claude、Kimi Code 和 OpenCode Go 的订阅额度窗口（session / weekly 等）
 直接显示在通知区域，并给出重置倒计时。它是 [CodexBar](https://github.com/NikolaFC/CodexBar)
 仓库里的原生 C# / WPF 集成，位于 `Integrations/Windows`，与 macOS 菜单栏应用（Swift，
 `Sources/`）和 Linux 桌面集成（Qt，`Integrations/Linux`）并列，不参与后两者的构建。
@@ -36,15 +36,37 @@ WPF + WinForms 托盘外壳，`tests/CodexBar.Tests` 是自带的自检程序。
 | --- | --- | --- |
 | Codex | `https://chatgpt.com/backend-api/wham/usage` | `%CODEX_HOME%`，未设置时为 `%USERPROFILE%\.codex`，读取其中的 `auth.json` |
 | Claude | `https://api.anthropic.com/api/oauth/usage` | `%CLAUDE_CONFIG_DIR%`，未设置时为 `%USERPROFILE%\.claude`，读取其中的 `.credentials.json` |
+| Kimi Code | `https://api.kimi.com/coding/v1/usages` | API Key：环境变量 `KIMI_CODE_API_KEY`（上游名），其次 `KIMI_API_KEY` |
+| OpenCode Go | `https://opencode.ai/zen/go/v1/usage` | API Key：环境变量 `OPENCODE_API_KEY`（上游名），其次 `OPENCODE_GO_API_KEY` |
 
-两个路径都可以在设置里覆盖（`CodexAuthPath`、`ClaudeCredentialsPath`），用于凭据放在
+两个 OAuth 路径都可以在设置里覆盖（`CodexAuthPath`、`ClaudeCredentialsPath`），用于凭据放在
 非默认位置的情况。
+
+Kimi Code 与 OpenCode Go 默认关闭，需在设置里勾选。API Key 先查进程环境变量，找不到再查设置里
+指定的 `.env` 文件（`ApiKeyEnvFile`，只接受本地路径，最大 1 MB，只取上表这几个变量名，其余行不保留）。
+Key 只用于这一次 `Authorization: Bearer` 请求，不写进设置文件、日志或界面；卡片的“来源”只显示变量名。
+窗口映射沿用上游：Kimi 优先 `usages.limit_5h / limit_7d` 比例池，同周期计数器（`limits[]` / `usage`）
+报得更高且重置时间一致时取计数器，另有 `limit_month_total` 月度总额；OpenCode Go 取
+`usage.rolling / weekly / monthly`，百分比按 0–100 直读。
+
+### 号池（多账号）
+
+同一个 provider 有多个账号时合并成一张卡：标签显示“N 个号”，每个号一行小标题加各自的窗口；大数字取
+**最充裕的那个号**在其最紧窗口上的剩余，旁边注“号池 可用数/总数”。某个号取数失败时其他号照常显示，卡片底部列出失败的号。
+
+- **Codex**：CLI 登录（`auth.json`）之外，可在设置里指定 Hermes 的 `auth.json`（`HermesAuthPath`），只读取
+  `credential_pool.openai-codex` 中 `auth_type=oauth` 条目的访问令牌与标签（不碰 refresh token 和其它 provider）。按 JWT 里的
+  `chatgpt_account_id` 去重，同一账号优先用未过期的令牌；令牌由 Hermes 刷新，过期只提示不代刷。号名取套餐名。
+- **Kimi Code / OpenCode Go**：除基础变量名外，`<基础名>_<后缀>`（如 `KIMI_API_KEY_SEC`、`OPENCODE_API_KEY_2`）也算一个号；
+  这类按名字发现的值必须像 Key（≥ 16 字符、无空白、不含 `://`），避免把 `*_BASE_URL` 当令牌发出。同名时环境变量优先，
+  同一个 Key 值只算一个号。接口不返回账号身份，号名就是变量名。
 
 工具只**读取**这些文件，不复制、不移动、不改写它们。
 
-两个 provider 都直接走各自的 OAuth usage endpoint，请求头与响应字段的映射沿用上游
+每个 provider 都直接走各自的官方 usage endpoint，请求头与响应字段的映射沿用上游
 CodexBar 的做法：Codex 的额度窗口来自 `chatgpt.com` 的 usage 响应，Claude 的额度窗口来自
-`api.anthropic.com` 的 OAuth usage 响应。程序自身的取数请求只发往这两个官方主机；“打开
+`api.anthropic.com` 的 OAuth usage 响应，Kimi Code 与 OpenCode Go 分别来自 `api.kimi.com` 与
+`opencode.ai`。程序自身的取数请求只发往这四个官方主机；“打开
 用量页面”是把 provider 官方页面交给默认浏览器，不发程序自己的请求。
 
 ## 凭据与登录状态
@@ -83,7 +105,7 @@ CodexBar 的做法：Codex 的额度窗口来自 `chatgpt.com` 的 usage 响应�
 - 关闭**主面板**只是把它隐藏到托盘，程序继续在后台运行；要真正结束请用托盘菜单里的“退出”。
 - 关闭**设置窗口**只是关闭这个设置窗口，不影响主面板或托盘图标的状态。
 - 可选开机自启只写当前用户的 `HKCU` 注册表项，关掉开关时会移除该项。
-- 托盘提示文字（tooltip）汇总两个 provider 的百分比；面板里按 provider 显示各自的额度
+- 托盘提示文字（tooltip）汇总各 provider 的百分比（受系统 63 字符上限截断）；面板里按 provider 显示各自的额度
   窗口和重置时间。
 - 命令行开关：`--demo`（演示数据）、`--background`（启动后不显示面板）、`--smoke-test`、
   `--screenshot <绝对路径>`、`--software-rendering`（本次运行强制软件渲染，诊断用）。
@@ -206,8 +228,9 @@ pwsh -NoProfile -File .\build.ps1 -Clean
 
 ## 已知限制
 
-- 只支持 Codex 和 Claude 两个 provider，未实现上游的其它 provider。
-- 不支持多账号：只能读取当前 CLI 已登录的那一个账号。
+- 只支持 Codex、Claude、Kimi Code（API Key）、OpenCode Go（API Key）四个 provider；上游 Kimi 的
+  网页 Cookie / Kimi CLI OAuth 来源、OpenCode Go 的网页 Cookie / 本地 SQLite 来源未移植，其它上游 provider 也未实现。
+- 多账号只覆盖 Codex（CLI + Hermes 凭据池）与 Kimi Code / OpenCode Go（多个 Key 变量）；Claude 仍只读当前 CLI 登录的账号。
 - 不自动刷新 OAuth，也不在工具内重新登录；凭据过期需要回到原 CLI 处理。
 - 不从 Windows 凭据管理器 / keyring 导入凭据，也不自动读取 WSL 内的凭据。
 - 没有后台服务、没有浏览器扩展，不需要管理员权限。

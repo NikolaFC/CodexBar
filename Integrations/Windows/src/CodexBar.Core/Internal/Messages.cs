@@ -58,8 +58,33 @@ internal static class Messages
     public static string NoWindows(string product) =>
         $"{product} 未返回任何有效的额度窗口。请确认该账号已启用相应套餐。";
 
+    public static string MissingApiKey(string product, IReadOnlyList<string> variables, string? envFile) =>
+        envFile is null
+            ? $"未找到 {product} API Key。请设置环境变量 {string.Join(" 或 ", variables)}，或在设置中指定包含它的 .env 文件。"
+            : $"未找到 {product} API Key：环境变量与 .env 文件中都没有 {string.Join(" / ", variables)}。";
+
+    public static string EnvFileProblem(string product, ApiKeyOutcome outcome) => outcome switch
+    {
+        ApiKeyOutcome.EnvFileNotLocal => $"{product} 的 .env 路径必须是本地文件路径，不接受网络路径或 URL。",
+        ApiKeyOutcome.EnvFileTooLarge => $"{product} 的 .env 文件异常巨大，已拒绝读取。请确认路径是否正确。",
+        _ => $"{product} 的 .env 文件无法读取（权限不足或文件被占用）。",
+    };
+
+    public static string HermesPoolProblem(CredentialOutcome outcome) => outcome switch
+    {
+        CredentialOutcome.Missing => "未找到设置里指定的 Hermes auth.json。",
+        CredentialOutcome.NotLocalPath => "Hermes auth.json 必须是本地文件路径。",
+        CredentialOutcome.Malformed => "Hermes auth.json 无法解析（可能正在写入），下次刷新会重试。",
+        CredentialOutcome.TooLarge => "Hermes auth.json 异常巨大，已拒绝读取。",
+        _ => "Hermes auth.json 无法读取（权限不足或文件被占用）。",
+    };
+
+    public static string HermesTokenExpired(string label) =>
+        $"Hermes 凭据池里 {label} 的访问令牌已过期。令牌由 Hermes 在下次使用时刷新，CodexBar 不会代刷。";
+
     public static string HintFor(string product) =>
-        product.Contains("Claude", StringComparison.OrdinalIgnoreCase)
-            ? "运行 `claude` 重新登录"
-            : "运行 `codex login` 重新登录";
+        product.Contains("Claude", StringComparison.OrdinalIgnoreCase) ? "运行 `claude` 重新登录"
+        : product.Contains("Kimi", StringComparison.OrdinalIgnoreCase) ? "在 Kimi Code 控制台确认 API Key 有效"
+        : product.Contains("OpenCode", StringComparison.OrdinalIgnoreCase) ? "在 opencode.ai 控制台确认 API Key 有效"
+        : "运行 `codex login` 重新登录";
 }

@@ -17,7 +17,8 @@ namespace CodexBar.Windows.Services;
 public static class ScreenshotRenderer
 {
     private const int PanelWidth = 480;
-    private const int PanelHeight = 680;
+    // Tall enough for all four demo cards, so the QA render shows the pooled card too.
+    private const int PanelHeight = 1320;
     private const int SettingsWidth = 520;
     private const int SettingsHeight = 700;
 
@@ -77,6 +78,8 @@ public static class ScreenshotRenderer
             RefreshSeconds = 120,
             CodexEnabled = true,
             ClaudeEnabled = true,
+            KimiEnabled = true,
+            OpenCodeGoEnabled = true,
             StartWithWindows = false,
             NotifyAtLowQuota = false,
         };
@@ -96,7 +99,7 @@ public static class ScreenshotRenderer
         var viewModel = new AppViewModel(demo: true, DisplayMode.Remaining);
         viewModel.VersionText += " demo";
 
-        foreach (var provider in new IUsageProvider[] { new DemoCodexProvider(), new DemoClaudeProvider() })
+        foreach (var provider in DemoProviders.All)
         {
             viewModel.Apply(provider.FetchAsync(new AppSettings()).GetAwaiter().GetResult());
         }

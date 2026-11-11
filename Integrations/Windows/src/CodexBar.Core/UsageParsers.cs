@@ -160,6 +160,7 @@ public static class CodexUsageParser
             "plus" or "plus plan" or "chatgpt plus" or "chatgpt-plus" or "chatgpt_plus" => "Plus",
             "pro" or "codex pro" => "Pro 20x",
             "prolite" or "pro_lite" or "pro-lite" or "pro lite" or "codex pro lite" => "Pro 5x",
+            "self_serve_business_prolite" => "Business Pro Lite",
             "free_workspace" => "Free Workspace",
             "team" => "Team",
             "business" => "Business",
@@ -442,5 +443,320 @@ public static class ClaudeUsageParser
         }
 
         return rateLimitTier.Trim();
+    }
+}
+
+/// <summary>
+/// Parser for <c>GET https://api.kimi.com/coding/v1/usages</c> (Kimi Code API key). Mirrors the
+/// upstream <c>KimiUsageSnapshot</c>: ratio pools (<c>usages.limit_5h/limit_7d</c>) are preferred,
+/// the request counters (<c>usage</c>, <c>limits[]</c>) fill in when a pool is absent or reports
+/// less usage for the same period.
+/// </summary>
+public static class KimiUsageParser
+{
+    public const string UsageEndpoint = "https://api.kimi.com/coding/v1/usages";
+    public const string SessionWindowName = "5小时";
+    public const string WeeklyWindowName = "7天";
+    public const string MonthlyWindowName = "月度总额";
+
+    private static readonly TimeSpan SessionDuration = TimeSpan.FromHours(5);
+    private static readonly TimeSpan WeeklyDuration = TimeSpan.FromDays(7);
+
+    public static ProviderUsageParseResult Parse(string json)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Kimi usage payload must be a JSON object.");
+        }
+
+        var pools = JsonUtil.ObjectOrNull(root, "usages");
+        var windows = new List<UsageWindow>();
+
+        TimeSpan? rateDuration = null;
+        RawWindow? rateCounts = null;
+        if (root.TryGetProperty("limits", out var limits) &&
+            limits.ValueKind == JsonValueKind.Array &&
+            limits.GetArrayLength() > 0 &&
+            limits[0].ValueKind == JsonValueKind.Object)
+        {
+            var first = limits[0];
+            rateDuration = WindowDuration(JsonUtil.ObjectOrNull(first, "window"));
+            rateCounts = Counts(JsonUtil.ObjectOrNull(first, "detail"), rateDuration ?? SessionDuration);
+        }
+
+        var session = Resolve(
+            Ratio(pools, "limit_5h", SessionDuration),
+            rateDuration is null || rateDuration == SessionDuration ? rateCounts : null);
+        if (session is null && rateCounts is { } other)
+        {
+            // A counter for a different cadence is still a real limit; keep its own label.
+            session = other;
+        }
+
+        if (session is { } sessionWindow)
+        {
+            var name = sessionWindow.Duration is { } d && d != SessionDuration
+                ? CodexUsageParser.DurationLabel(d)
+                : SessionWindowName;
+            windows.Add(CodexUsageParser.Build(name, sessionWindow, SessionDuration));
+        }
+
+        var weeklyCounts = Counts(JsonUtil.ObjectOrNull(root, "usage"), WeeklyDuration);
+        if (Resolve(Ratio(pools, "limit_7d", WeeklyDuration), weeklyCounts) is { } weekly)
+        {
+            windows.Add(CodexUsageParser.Build(WeeklyWindowName, weekly, WeeklyDuration));
+        }
+
+        if (Ratio(pools, "limit_month_total", null) is { } monthly)
+        {
+            windows.Add(CodexUsageParser.Build(MonthlyWindowName, monthly));
+        }
+
+        return new ProviderUsageParseResult(MapPlan(root), null, windows);
+    }
+
+    /// <summary>
+    /// Prefers the ratio pool; a counter for the same period wins only when it reports more usage
+    /// and both reset clocks agree (the two sources differ by about a second and a half).
+    /// </summary>
+    private static RawWindow? Resolve(RawWindow? ratio, RawWindow? counts)
+    {
+        if (ratio is not { } pool)
+        {
+            return counts;
+        }
+
+        if (counts is { } counter &&
+            counter.UsedPercent > pool.UsedPercent &&
+            counter.ResetsAt is { } counterReset &&
+            pool.ResetsAt is { } poolReset &&
+            Math.Abs((counterReset - poolReset).TotalSeconds) <= 2)
+        {
+            return counter;
+        }
+
+        return pool;
+    }
+
+    private static RawWindow? Ratio(JsonElement? pools, string name, TimeSpan? duration)
+    {
+        if (pools is not { } container || JsonUtil.ObjectOrNull(container, name) is not { } pool)
+        {
+            return null;
+        }
+
+        if (JsonUtil.FiniteNumber(pool, "used_ratio", "usedRatio") is not { } ratio || ratio < 0)
+        {
+            return null;
+        }
+
+        return new RawWindow(
+            Math.Min(1, ratio) * 100,
+            JsonUtil.ParseIso8601(JsonUtil.NonEmptyString(pool, "reset_time", "resetTime")),
+            duration);
+    }
+
+    /// <summary>
+    /// Request counters. <c>used</c> is authoritative; <c>remaining</c> must describe a valid
+    /// balance. Unusable counters are skipped instead of becoming a fabricated 0%.
+    /// </summary>
+    private static RawWindow? Counts(JsonElement? detail, TimeSpan duration)
+    {
+        if (detail is not { } value ||
+            JsonUtil.FiniteNumber(value, "limit") is not { } limit ||
+            limit <= 0)
+        {
+            return null;
+        }
+
+        double? used = JsonUtil.FiniteNumber(value, "used") is { } u && u >= 0 ? u : null;
+        if (used is null &&
+            JsonUtil.FiniteNumber(value, "remaining") is { } remaining &&
+            remaining >= 0 && remaining <= limit)
+        {
+            used = limit - remaining;
+        }
+
+        if (used is not { } count)
+        {
+            return null;
+        }
+
+        var reset = JsonUtil.ParseIso8601(
+            JsonUtil.NonEmptyString(value, "resetTime", "resetAt", "reset_time", "reset_at"));
+        return new RawWindow(Math.Clamp(count / limit * 100, 0, 100), reset, duration);
+    }
+
+    private static TimeSpan? WindowDuration(JsonElement? window)
+    {
+        if (window is not { } value ||
+            JsonUtil.Integer(value, "duration") is not { } amount ||
+            amount <= 0)
+        {
+            return null;
+        }
+
+        var minutes = JsonUtil.NonEmptyString(value, "timeUnit", "time_unit") switch
+        {
+            "TIME_UNIT_MINUTE" => amount,
+            "TIME_UNIT_HOUR" => amount * 60,
+            "TIME_UNIT_DAY" => amount * 24 * 60,
+            _ => -1,
+        };
+
+        return minutes is > 0 and <= CodexUsageParser.MaxWindowSeconds / 60
+            ? TimeSpan.FromMinutes(minutes)
+            : null;
+    }
+
+    /// <summary>Membership level names from the official V1 goods catalog; unknown levels stay verbatim.</summary>
+    private static string? MapPlan(JsonElement root)
+    {
+        var user = JsonUtil.ObjectOrNull(root, "user");
+        var membership = user is { } u ? JsonUtil.ObjectOrNull(u, "membership") : null;
+        var level = membership is { } m ? JsonUtil.NonEmptyString(m, "level") : null;
+        if (level is null || level == "LEVEL_UNSPECIFIED")
+        {
+            return null;
+        }
+
+        var version = JsonUtil.NonEmptyString(root, "version");
+        if (version is not null && version != "GOODS_VERSION_V1")
+        {
+            return level;
+        }
+
+        return level switch
+        {
+            "LEVEL_FREE" => "Adagio",
+            "LEVEL_TRIAL" => "Andante",
+            "LEVEL_BASIC" => "Moderato",
+            "LEVEL_INTERMEDIATE" => "Allegretto",
+            "LEVEL_ADVANCED" => "Allegro",
+            _ => level,
+        };
+    }
+}
+
+/// <summary>
+/// Parser for <c>GET https://opencode.ai/zen/go/v1/usage</c> (OpenCode Go API key). The rolling
+/// 5-hour meter is required, weekly and monthly are optional; the API reports percentages
+/// directly in 0..100, matching the upstream <c>parseAPIUsage</c> path.
+/// </summary>
+public static class OpenCodeGoUsageParser
+{
+    public const string UsageEndpoint = "https://opencode.ai/zen/go/v1/usage";
+    public const string SessionWindowName = "5小时";
+    public const string WeeklyWindowName = "每周";
+    public const string MonthlyWindowName = "每月";
+
+    private static readonly string[] PercentKeys =
+    {
+        "usagePercent", "usedPercent", "percentUsed", "percent", "usage_percent", "used_percent",
+        "utilization", "utilizationPercent", "utilization_percent",
+    };
+
+    private static readonly string[] ResetInKeys =
+    {
+        "resetInSec", "resetInSeconds", "resetSeconds", "reset_sec", "reset_in_sec", "resetsInSec",
+        "resetsInSeconds", "resetIn", "resetSec",
+    };
+
+    private static readonly string[] ResetAtKeys =
+    {
+        "resetAt", "resetsAt", "reset_at", "resets_at", "nextReset", "next_reset", "renewAt", "renew_at",
+    };
+
+    public static ProviderUsageParseResult Parse(string json, DateTimeOffset? now = null)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        if (root.ValueKind != JsonValueKind.Object ||
+            JsonUtil.ObjectOrNull(root, "usage") is not { } usage ||
+            JsonUtil.ObjectOrNull(usage, "rolling") is not { } rolling ||
+            ReadWindow(rolling, now ?? DateTimeOffset.UtcNow) is not { } session)
+        {
+            throw new JsonException("OpenCode Go usage payload is missing the rolling window.");
+        }
+
+        var clock = now ?? DateTimeOffset.UtcNow;
+        var windows = new List<UsageWindow>
+        {
+            CodexUsageParser.Build(SessionWindowName, session, TimeSpan.FromHours(5)),
+        };
+
+        if (JsonUtil.ObjectOrNull(usage, "weekly") is { } weeklyElement &&
+            ReadWindow(weeklyElement, clock) is { } weekly)
+        {
+            windows.Add(CodexUsageParser.Build(WeeklyWindowName, weekly, TimeSpan.FromDays(7)));
+        }
+
+        if (JsonUtil.ObjectOrNull(usage, "monthly") is { } monthlyElement &&
+            ReadWindow(monthlyElement, clock) is { } monthly)
+        {
+            windows.Add(CodexUsageParser.Build(MonthlyWindowName, monthly));
+        }
+
+        return new ProviderUsageParseResult(null, null, windows);
+    }
+
+    private static RawWindow? ReadWindow(JsonElement window, DateTimeOffset now)
+    {
+        var percent = JsonUtil.FiniteNumber(window, PercentKeys);
+        if (percent is null &&
+            JsonUtil.FiniteNumber(window, "used", "usage", "consumed", "count", "usedTokens") is { } used &&
+            JsonUtil.FiniteNumber(window, "limit", "total", "quota", "max", "cap", "tokenLimit") is { } limit &&
+            limit > 0)
+        {
+            percent = used / limit * 100;
+        }
+
+        if (JsonUtil.ClampPercent(percent) is not { } usedPercent)
+        {
+            return null;
+        }
+
+        DateTimeOffset? resetsAt = null;
+        if (JsonUtil.Integer(window, ResetInKeys) is { } seconds && seconds >= 0 &&
+            seconds <= CodexUsageParser.MaxWindowSeconds)
+        {
+            resetsAt = now.AddSeconds(seconds);
+        }
+        else
+        {
+            foreach (var key in ResetAtKeys)
+            {
+                if (DateValue(window, key) is { } at)
+                {
+                    resetsAt = at;
+                    break;
+                }
+            }
+        }
+
+        return new RawWindow(usedPercent, resetsAt, null);
+    }
+
+    /// <summary>ISO-8601 strings, or Unix seconds / milliseconds as numbers or numeric strings.</summary>
+    private static DateTimeOffset? DateValue(JsonElement parent, string key)
+    {
+        if (JsonUtil.FiniteNumber(parent, key) is { } number)
+        {
+            if (number > 1_000_000_000_000)
+            {
+                return JsonUtil.FromUnixSeconds((long)(number / 1000));
+            }
+
+            if (number > 1_000_000_000)
+            {
+                return JsonUtil.FromUnixSeconds((long)number);
+            }
+        }
+
+        return JsonUtil.ParseIso8601(JsonUtil.NonEmptyString(parent, key));
     }
 }

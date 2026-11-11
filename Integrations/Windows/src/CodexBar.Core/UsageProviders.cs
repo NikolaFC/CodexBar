@@ -257,36 +257,101 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
             return ProviderSupport.Disabled(Id);
         }
 
+        var now = DateTimeOffset.UtcNow;
         var load = CodexCredentialsReader.Load(settings);
-        if (load.Outcome != CredentialOutcome.Ok || load.Credentials is not { } credentials)
+        var cliFailure = load.Outcome != CredentialOutcome.Ok || load.Credentials is null
+            ? ProviderSupport.FromCredentialOutcome(Id, load.Outcome, ProductName, Messages.HintFor(ProductName))
+            : null;
+
+        var candidates = new List<(string Label, CodexCredentials Credentials, bool FromHermes)>();
+        if (load.Credentials is { } cli)
         {
-            return ProviderSupport.FromCredentialOutcome(
-                Id,
-                load.Outcome,
-                ProductName,
-                Messages.HintFor(ProductName));
+            candidates.Add(("Codex CLI", cli, false));
         }
 
-        if (credentials.IsExpired(DateTimeOffset.UtcNow))
+        UsageSnapshot? poolFailure = null;
+        if (!string.IsNullOrWhiteSpace(settings.HermesAuthPath))
         {
-            return ProviderSupport.AuthenticationRequired(
-                Id,
-                Messages.Expired(ProductName, Messages.HintFor(ProductName)));
+            var pool = HermesCredentialPool.LoadCodex(settings.HermesAuthPath.Trim());
+            if (pool.Outcome == CredentialOutcome.Ok)
+            {
+                candidates.AddRange(pool.Accounts.Select(account => (account.Label, account.Credentials, true)));
+            }
+            else
+            {
+                poolFailure = ProviderSupport.Unavailable(Id, Messages.HermesPoolProblem(pool.Outcome));
+            }
+        }
+
+        // One account can appear twice (the CLI login and a Hermes pool entry): keep one per
+        // account id, preferring an unexpired token.
+        var accounts = candidates
+            .GroupBy(candidate => candidate.Credentials.AccountId ?? $"token:{candidates.IndexOf(candidate)}",
+                StringComparer.OrdinalIgnoreCase)
+            .Select(group => group.FirstOrDefault(candidate => !candidate.Credentials.IsExpired(now)) is { Label: not null } fresh
+                ? fresh
+                : group.First())
+            .ToList();
+
+        if (accounts.Count == 0)
+        {
+            return cliFailure ?? poolFailure ?? ProviderSupport.FromCredentialOutcome(
+                Id, CredentialOutcome.Missing, ProductName, Messages.HintFor(ProductName));
         }
 
         _transport ??= HttpTransport.Create(_client);
+        var transport = _transport;
+
+        var snapshots = await Task.WhenAll(accounts.Select(account =>
+            FetchAccountAsync(transport, account.Credentials, account.FromHermes ? account.Label : null, now, cancellationToken)))
+            .ConfigureAwait(false);
+
+        var members = accounts
+            .Select((account, index) => new PoolMember(snapshots[index].Plan ?? account.Label, snapshots[index]))
+            .ToList();
+        if (cliFailure is not null && load.Outcome != CredentialOutcome.Missing)
+        {
+            // A broken CLI login is still worth reporting next to the pool accounts that work.
+            members.Insert(0, new PoolMember("Codex CLI", cliFailure));
+        }
+
+        if (poolFailure is not null)
+        {
+            members.Add(new PoolMember("Hermes 凭据池", poolFailure));
+        }
+
+        return AccountPool.Combine(Id, members);
+    }
+
+    /// <param name="hermesLabel">Set for Hermes pool entries, whose tokens Hermes (not the Codex CLI) refreshes.</param>
+    private async Task<UsageSnapshot> FetchAccountAsync(
+        HttpTransport transport,
+        CodexCredentials credentials,
+        string? hermesLabel,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var source = hermesLabel is null ? "OAuth" : $"Hermes · {hermesLabel}";
+        if (credentials.IsExpired(now))
+        {
+            return ProviderSupport.AuthenticationRequired(
+                Id,
+                hermesLabel is null
+                    ? Messages.Expired(ProductName, Messages.HintFor(ProductName))
+                    : Messages.HermesTokenExpired(hermesLabel)) with { Source = source };
+        }
 
         var (failure, result) = await ProviderSupport.TrySendAsync(
             Id,
             ProductName,
-            _transport,
+            transport,
             () => BuildRequest(credentials),
             _timeout,
             cancellationToken).ConfigureAwait(false);
 
         if (failure is not null)
         {
-            return failure;
+            return failure with { Source = source };
         }
 
         try
@@ -298,7 +363,7 @@ public sealed class CodexUsageProvider : IUsageProvider, IDisposable
                 parsed,
                 parsed.Plan,
                 credentials.AccountId,
-                "OAuth");
+                source);
         }
         catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException)
         {
@@ -438,4 +503,146 @@ public sealed class ClaudeUsageProvider : IUsageProvider, IDisposable
         _transport?.Dispose();
         _transport = null;
     }
+}
+
+/// <summary>
+/// Shared flow for providers authenticated by a long-lived API key: resolve the key from the
+/// environment or the configured .env file, send one bearer GET, parse. Keys are never stored,
+/// refreshed, or shown.
+/// </summary>
+public abstract class ApiKeyUsageProvider : IUsageProvider, IDisposable
+{
+    private readonly HttpClient? _client;
+    private readonly TimeSpan _timeout;
+    private readonly Func<string, string?>? _environment;
+    private HttpTransport? _transport;
+
+    protected ApiKeyUsageProvider(HttpClient? client, TimeSpan? requestTimeout, Func<string, string?>? environment)
+    {
+        _client = client;
+        _timeout = requestTimeout ?? TimeSpan.FromSeconds(HttpDefaults.DefaultTimeoutSeconds);
+        _environment = environment;
+    }
+
+    public abstract ProviderId Id { get; }
+
+    protected abstract string Endpoint { get; }
+
+    protected abstract ProviderUsageParseResult Parse(string body);
+
+    private string ProductName => ProviderCatalog.DisplayName(Id);
+
+    public async Task<UsageSnapshot> FetchAsync(
+        AppSettings settings,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!settings.IsEnabled(Id))
+        {
+            return ProviderSupport.Disabled(Id);
+        }
+
+        var loads = ApiKeyResolver.ResolveAll(Id, settings, _environment);
+        if (loads is [{ Outcome: not ApiKeyOutcome.Ok } problem])
+        {
+            return problem.Outcome == ApiKeyOutcome.Missing
+                ? ProviderSupport.NotConfigured(
+                    Id,
+                    Messages.MissingApiKey(ProductName, ApiKeyResolver.VariableNames(Id), problem.Source))
+                : ProviderSupport.Unavailable(Id, Messages.EnvFileProblem(ProductName, problem.Outcome));
+        }
+
+        _transport ??= HttpTransport.Create(_client);
+        var transport = _transport;
+
+        var snapshots = await Task.WhenAll(loads.Select(load => FetchKeyAsync(transport, load, cancellationToken)))
+            .ConfigureAwait(false);
+        return AccountPool.Combine(
+            Id,
+            loads.Select((load, index) => new PoolMember(load.Variable!, snapshots[index])).ToList());
+    }
+
+    private async Task<UsageSnapshot> FetchKeyAsync(
+        HttpTransport transport,
+        ApiKeyLoad load,
+        CancellationToken cancellationToken)
+    {
+        var (failure, result) = await ProviderSupport.TrySendAsync(
+            Id,
+            ProductName,
+            transport,
+            () => BuildRequest(load.Key!),
+            _timeout,
+            cancellationToken).ConfigureAwait(false);
+
+        var source = $"API Key · {load.Variable}";
+        if (failure is not null)
+        {
+            return failure with { Source = source };
+        }
+
+        try
+        {
+            var parsed = Parse(result!.Body);
+            return ProviderSupport.Success(Id, ProductName, parsed, parsed.Plan, null, source);
+        }
+        catch (Exception ex) when (ex is JsonException or ArgumentException or NotSupportedException)
+        {
+            return ProviderSupport.ParseFailure(Id, ProductName, ex);
+        }
+    }
+
+    private HttpRequestMessage BuildRequest(string apiKey)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, Endpoint);
+        request.Headers.TryAddWithoutValidation("Authorization", $"Bearer {apiKey}");
+        request.Headers.TryAddWithoutValidation("Accept", "application/json");
+        request.Headers.TryAddWithoutValidation("User-Agent", "CodexBar-Windows");
+        return request;
+    }
+
+    public void Dispose()
+    {
+        _transport?.Dispose();
+        _transport = null;
+    }
+}
+
+/// <summary>Kimi Code plan quota from the Code API with a <c>sk-kimi</c> key.</summary>
+public sealed class KimiUsageProvider : ApiKeyUsageProvider
+{
+    /// <param name="environment">Environment lookup, replaceable in tests; defaults to the process environment.</param>
+    public KimiUsageProvider(
+        HttpClient? client = null,
+        TimeSpan? requestTimeout = null,
+        Func<string, string?>? environment = null)
+        : base(client, requestTimeout, environment)
+    {
+    }
+
+    public override ProviderId Id => ProviderId.Kimi;
+
+    protected override string Endpoint => KimiUsageParser.UsageEndpoint;
+
+    protected override ProviderUsageParseResult Parse(string body) => KimiUsageParser.Parse(body);
+}
+
+/// <summary>OpenCode Go subscription meters from the Zen Go usage API.</summary>
+public sealed class OpenCodeGoUsageProvider : ApiKeyUsageProvider
+{
+    /// <param name="environment">Environment lookup, replaceable in tests; defaults to the process environment.</param>
+    public OpenCodeGoUsageProvider(
+        HttpClient? client = null,
+        TimeSpan? requestTimeout = null,
+        Func<string, string?>? environment = null)
+        : base(client, requestTimeout, environment)
+    {
+    }
+
+    public override ProviderId Id => ProviderId.OpenCodeGo;
+
+    protected override string Endpoint => OpenCodeGoUsageParser.UsageEndpoint;
+
+    protected override ProviderUsageParseResult Parse(string body) => OpenCodeGoUsageParser.Parse(body);
 }
