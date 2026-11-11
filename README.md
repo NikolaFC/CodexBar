@@ -5,6 +5,7 @@
 [![Latest release](https://img.shields.io/github/v/release/steipete/CodexBar?style=flat-square&color=0a0a0c)](https://github.com/steipete/CodexBar/releases/latest)
 [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-0a0a0c?style=flat-square)](https://github.com/steipete/CodexBar/releases/latest)
 [![Linux desktop](https://img.shields.io/badge/Linux-Qt_6-1793d1?style=flat-square)](Integrations/Linux/README.md)
+[![Windows native](https://img.shields.io/badge/Windows-native-0078d4?style=flat-square)](Integrations/Windows/README.md)
 [![Homebrew](https://img.shields.io/badge/brew-steipete%2Ftap%2Fcodexbar-orange?style=flat-square)](https://github.com/steipete/homebrew-tap)
 [![AUR](https://img.shields.io/aur/version/codexbar-cli?style=flat-square&color=1793d1)](https://aur.archlinux.org/packages/codexbar-cli)
 [![License: MIT](https://img.shields.io/badge/license-MIT-6e5aff?style=flat-square)](LICENSE)
@@ -50,6 +51,15 @@ GNOME may need a tray extension; the app's windows work without a tray.
 
 See the [macOS feature comparison](Integrations/Linux/MAC_COMPARISON.md) for
 supported features and remaining gaps.
+
+### Windows desktop (native)
+
+[Integrations/Windows](Integrations/Windows/README.md) holds a native C#/WPF tray app that
+shows Codex and Claude quota windows in the notification area, reusing the credentials the
+`codex` and `claude` CLIs already wrote. It ships as a self-contained win-x64 portable zip
+(no .NET install, no admin rights) from the `Windows native` workflow artifacts, and builds
+locally with `pwsh -File Integrations/Windows/build.ps1`. This integration currently
+supports Codex and Claude only.
 
 ### CLI Tarballs (macOS/Linux)
 Homebrew formula (Linux today):
@@ -292,6 +302,7 @@ CLI install:
 - 🧿 [oracle](https://askoracle.dev) — Ask the oracle when you're stuck. Invoke GPT-5 Pro with a custom context and files.
 
 ## Looking for a Windows version?
+- [CodexBar for Windows (in this repo)](Integrations/Windows/README.md) — Native Windows tray app written in C#/WPF: Codex and Claude quota windows, self-contained x64 portable build.
 - [Win-CodexBar](https://github.com/Finesssee/Win-CodexBar)
 - [CodexBar for Windows](https://github.com/hinneslung/CodexBar-for-Windows) — Native Windows tray app powered by the original CodexBar CLI through WSL2; x64 and ARM64 installers.
 

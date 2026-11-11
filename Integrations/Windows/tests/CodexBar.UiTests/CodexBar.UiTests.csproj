@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>CodexBar.UiTests</RootNamespace>
+    <AssemblyName>CodexBar.UiTests</AssemblyName>
+    <!-- Console runner: no window is created and no registry value is touched. -->
+    <UseWindowsForms>false</UseWindowsForms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!--
+      This project has no XAML to compile, but UseWPF still routes through the
+      temporary _wpftmp project, whose extra in-process MSBuild pass fails
+      without a diagnostic under the restricted sandbox that build.ps1 targets.
+      The solution build and build.ps1 run test projects without -m:1, so
+      compile XAML in-process instead and keep the whole pipeline single-pass.
+    -->
+    <DisableWpfTempProject>true</DisableWpfTempProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      Only the WPF project is referenced explicitly. It already references
+      CodexBar.Core, and project references are transitive, so the duplicate
+      direct edge is unnecessary; keeping it created a diamond that made the
+      multi-node target-framework negotiation spawn an inner MSBuild node in
+      which the SDK resolver fails without a diagnostic.
+    -->
+    <ProjectReference Include="..\..\src\CodexBar.Windows\CodexBar.Windows.csproj"
+                      SkipGetTargetFrameworkProperties="true" />
+  </ItemGroup>
+
+</Project>
